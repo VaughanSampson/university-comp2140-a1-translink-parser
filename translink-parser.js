@@ -2,41 +2,149 @@ import promptSync from 'prompt-sync';
 import fs from "fs";
 import {parse} from "csv-parse";
 
+
+
+/**
+ * Get stop times which are have a stopID included in the given array.
+ * @param {*} stopIDList Array of stop IDs.
+ * @returns JSON array of stop times which have a stopID included in the given array
+ */
+async function getStopTimesFromStopIDs(stopIDList){
+  const stopTimes = (await parseLocalCSVToJSON("./static-data/stop_times.txt"))
+  .filter(item => stopIDList.includes(item[3]))
+  .map(item => { return {
+    trip_id : item[0],
+    arrival_time : item[1],
+    stop_id : item[3]
+  }});
+  return stopTimes;
+}
+
+async function generalJoinOnField(joinType = "inner", onField, left, right, addFieldsFromJoin)
+{
+  // If join is "right", then simply flip left and right fields with recursion.
+  if (joinType === "right")
+    return generalJoinOnField("left", onField, right, left, addFieldsFromJoin);
+  
+  // Join with array.map and array.find.
+  const joined = left.map( leftItem => {
+
+      const rightItem = right.find(rightItem => rightItem[onField] === leftItem[onField]);
+
+      // Handle a there being no matching rightItem.
+      if(!rightItem)
+      {
+        if (joinType === "inner") 
+          return null;
+        
+        if(joinType === "left")
+          return leftItem;
+      }
+
+      // Merge matching fields found
+      const mergedRight = {};
+      for (const field of addFieldsFromJoin)
+        if (rightItem.hasOwnProperty(field))
+          mergedRight[field] = rightItem[field];
+      
+        return{
+          ...leftItem,
+          ...mergedRight
+        };
+    
+  }).filter(joined => joined != null); // Remove null returns.
+
+  return joined;
+}
+
+async function joinLiveDataToStaticData(staticData, liveTripsData, livePositionsData){
+
+  const joinData = staticData.map(data => {
+
+    const joinedLiveTrip = liveTripsData.find(trip => trip.trip_id === data.trip_id);
+    const joinedLivePostion = livePositionsData.find(position => position.vehicle.trip.trip_id === data.trip_id);
+    //const joinedLiveStop = null;
+    //if(joinedLiveTrip) joinedLiveTrip.tripUpdate.stopTimeUpdate.find(stop => stop.stop_id === data.stop_id);
+    
+    return{
+      "staticData" : data,
+      "liveTripsData" : joinedLiveTrip,
+      "livePositionsData" : joinedLivePostion
+    }
+
+  });
+
+  return joinData;
+
+}
+
+
 /**
  * Joins data for each stop time at the UQLakes station.
- * @returns Object with accumulated stop time data.
+ * @returns Object with accumulated stop time results.
  */
-async function LoadAllStaticUQLakesData(){
-  
-  // Get data from stop.txt
-  const stops = (await parseLocalCSVToJSON("./static-data/stops.txt"))
-  .filter(stop => stop[9] == "place_uqlksa")
-  .map(stop => { return{stop_id : stop[0]}});
 
-  // Get data from routes.txt and join with tripsData
+async function loadUQStopsData(){
+
+  // Get stopIDs from stop.txt.
+  const stopIDs = (await parseLocalCSVToJSON("./static-data/stops.txt"))
+  .filter(item => item[9] == "place_uqlksa")
+  .map(item => item[0]);
+  console.log(stopIDs);
+
+  // Get stop times from stop_times.txt, filtered by stopID.
+  const stopTimes = await getStopTimesFromStopIDs(stopIDs);
+
+  // Get trips data from trips.txt.
+  const trips = (await parseLocalCSVToJSON("./static-data/trips.txt"))
+  .map(item => {return {
+    route_id : item[0],
+    service_id : item[1],
+    trip_id : item[2],
+    trip_headsign : item[4]
+  }});
+
+  let joinedData = await generalJoinOnField("inner", "trip_id", stopTimes, trips, ['route_id','service_id','trip_headsign']); 
+  
+  // Get routes data from routes.txt.
   const routes = (await parseLocalCSVToJSON("./static-data/routes.txt"))
+  .map(item => {return {
+      route_id : item[0],
+      route_short_name : item[1],
+      route_long_name : item[2],
+  }});
+
+  joinedData = await generalJoinOnField("inner", "route_id", joinedData, routes, ['route_short_name','route_long_name']);
+
+  return joinedData;
+/*
 
   // Get data from calendar.txt
-  const calendarDates = (await parseLocalCSVToJSON("./static-data/calendar_dates.txt"));
+  
 
-  // Get data from trips.txt
-  const trips = (await parseLocalCSVToJSON("./static-data/trips.txt"));
+  // Get data from calendar_dates.txt
+  const calendarDates = (await parseLocalCSVToJSON("./static-data/calendar_dates.txt"))
+  .map(item => {return {
+    service_id : item[0],
+    date : item[1],
+    exception_type : item[2]
+  }});
+*/
 
-  // Get data from stop_times.txt and join with stopsData
-  const stopTimes = (await parseLocalCSVToJSON("./static-data/stop_times.txt"))
+  // Get data from stop_times.txt and join with all other data
+  /*const stopTimes = (await parseLocalCSVToJSON("./static-data/stop_times.txt"))
   .map( stopTime => {
     
       const joinedStop = stops.find(stop => stop.stop_id === stopTime[3]);
-      if (joinedStop == null) return null;
+      if (!joinedStop) return null;
 
       const joinedTrip = trips.find(trip => trip[2] === stopTime[0]);
-      if (joinedStop == null) return null;
 
       const joinedRoute = routes.find(route => route[0] === joinedTrip[0]);
-      if(joinedRoute == null) return null;
 
-      const joinedCalendar = calendarDates.find(date => date[0] === joinedTrip[1]);
-      if(joinedCalendar == null) return null;
+      const joinedCalendar = calendar.find(service => service[0] === joinedTrip[1]);
+
+      if(!joinedCalendar) console.log(joinedTrip[1]);
 
       return{
         trip_id : stopTime[0],
@@ -49,10 +157,12 @@ async function LoadAllStaticUQLakesData(){
         route_long_name : joinedRoute[2],
         head_sign : joinedTrip[3]
       }
-  }).filter(stopTime => stopTime!=null);
+
+  }).filter(stopTime => stopTime != null);
   
   return stopTimes;
-}
+  */
+} 
 
 
 /**
@@ -64,6 +174,7 @@ async function LoadAllStaticUQLakesData(){
  * @param {*} date date to filter upon.
  * @returns 
  */
+
 function filterData(staticData, routeShortName, time, minuteRange, date){
 
   const minuteTime = hourTimeToMinutes(time);
@@ -71,7 +182,7 @@ function filterData(staticData, routeShortName, time, minuteRange, date){
   const maxTime = minuteTime + minuteRange;
 
   return staticData.filter(data => {
-    if(routeShortName != "ShowAllRoutes" && data.route_short_name != routeShortName) 
+    if(routeShortName !== "Show All Routes" && data.route_short_name !== routeShortName) 
       return false;
 
     const minuteArrivalTime = hourTimeToMinutes(data.arrival_time);
@@ -85,6 +196,7 @@ function filterData(staticData, routeShortName, time, minuteRange, date){
   });
 }
 
+
 /**
  * Convect HH:mm time to number of minutes.
  * @param {*} timeString HH:mm formatted string.
@@ -95,24 +207,68 @@ function hourTimeToMinutes(timeString){
   * 60 + Number(timeString[3]) * 10 + Number(timeString[4]);
 }
 
+async function joinStopsWithCalendarOnDate(stopsData, textDate){
+
+  // Get calendar data from calender.txt.
+  const calendar = (await parseLocalCSVToJSON("./static-data/calendar.txt"))
+  .map(item => {return {
+      sunday : item[7],
+      monday : item[1],
+      tuesday : item[2],
+      wednesday : item[3],
+      thursday : item[4],
+      friday : item[5],
+      saturday : item[6],
+      service_id : item[0],
+      start_date : item[8],
+      end_date : item[9]
+  }});
+
+  calendar.filter( data => {
+    // Check start date.
+    if(Date.parse(textDate) < Date.parse(data.start_date.slice(0, 3) + "-" + data.start_date.slice(3-5) + '-' + data.start_date.slice(5)))
+      return false;
+
+    // Check end date.
+    if(Date.parse(textDate) > Date.parse(data.end_date.slice(0, 3) + "-" + data.end_date.slice(3-5) + '-' + data.end_date.slice(5)))
+      return false;
+
+    // Check weekday.
+    let date = new Date(Date.parse(textDate));
+    if(data[date.getDay()-1] === 0) 
+      return false;
+    
+    return true;
+  });
+
+  let joinedData = await generalJoinOnField("inner", "service_id", stopsData, calendar, ['start_date','end_date', 'saturday']); 
+  return joinedData;
+}
 
 /**
- * Recursive loop to be called once, starting the program.
+ * Recursive loop to be called to start the program.
  */
 async function mainLoop(){
+   
+  //const livePositionsData = await parseOnlineDataToJSON("http://127.0.0.1:5343/gtfs/seq/vehicle_positions.json");
   
-  const staticData = await LoadAllStaticUQLakesData();
-
-  console.log("Welcome to the UQ Lakes station bus tracker!");
+  //const liveTripsData = await parseOnlineDataToJSON("http://127.0.0.1:5343/gtfs/seq/trip_updates.json");
+  
+  const uqStopsData = await loadUQStopsData();
+  const uqStopsOnDate = await joinStopsWithCalendarOnDate(uqStopsData, "23-08-19");
+  console.log(uqStopsOnDate);
+  //const completeJoin = await joinLiveDataToStaticData(staticData, liveTripsData["entity"],livePositionsData["entity"]);
+  //console.log(completeJoin[0]["staticData"]);
+  //console.log(completeJoin[0]["liveTripsData"]);
 
   // Get valid user input to filter results.
   const prompt = promptSync();
-    
-  const inputDate = getValidatedDateInput(prompt);
-  const inputTime = getValidatedTimeInput(prompt);
-  const inputRoute = getValidatedBusRouteInput(prompt);
+  //const inputDate = getValidatedDateInput(prompt);
+  //const inputTime = getValidatedTimeInput(prompt);
+  //const inputRoute = getValidatedBusRouteInput(prompt);
   
-  console.log(await filterData(staticData, inputRoute, inputTime, 10, inputDate));
+  //console.log(completeJoin);
+  //console.log(await filterOnDate(completeJoin, "20230921"));
   
   // Get valid user input to end or loop the program.
   const endStatus = prompt("Would you like to search again?");
@@ -129,8 +285,6 @@ async function mainLoop(){
   } 
 
 }
-
-
 
 /**
  * Recursive function to get and validate date input from console.
@@ -184,101 +338,23 @@ function getValidatedBusRouteInput(prompt, promptText = "What Bus Route would yo
  * @returns JSON formatted date from the file data.
  */
 async function parseLocalCSVToJSON(path){
-  let returnJson = [];
+  const returnJSON = [];
   return new Promise((resolve) => {
     fs.createReadStream(path).pipe(parse())
-    .on("data", (data) => { returnJson.push(data); })
-    .on("end", () => resolve(returnJson))
+    .on("data", (data) => { returnJSON.push(data); })
+    .on("end", () => resolve(returnJSON))
   });
 };
 
-
+/**
+ * Fetch JSON data from the given path.
+ * @param {*} url pointing to JSON data online.
+ * @returns A JSON object fetched from the given path.
+ */
+async function parseOnlineDataToJSON(url){
+  const response = await fetch(url);
+  const returnJSON = await response.json();
+  return returnJSON;
+}
 
 mainLoop();
-
-
-
-
-/*
-async function showTableOfData(parentStation, routeShortName, time, minuteRange, date ){
-
-  // Get useful data from static stop.txt
-  const usefulStopsData = (await parseLocalCSVToJSON("./static-data/stops.txt"))
-  .filter(stop => stop[9] == parentStation)
-  .map(stop => { return{stop_id : stop[0]}});
-  console.log(usefulStopsData); 
-
-  // Get useful data from static calender_dates.txt
-  const usefulCalenderDatesData = (await parseLocalCSVToJSON("./static-data/calendar_dates.txt"))
-  .filter(calendarDate => calendarDate[1] == date)
-  .map(calendarDate => { return{service_id : calendarDate[0]}});
-  console.log(usefulCalenderDatesData); 
-
-  // Get useful data from static routes.txt
-  const usefulRoutesData = (await parseLocalCSVToJSON("./static-data/routes.txt"))
-  .filter(route => route[1] == routeShortName)
-  .map(route => { 
-    return{
-      route_id : route[0],
-      route_long_name : route[2]
-    }
-  });
-  console.log(usefulRoutesData); 
-
-  // Get useful data from static trips.txt, joining with routes and services
-  const usefulTripsData = (await parseLocalCSVToJSON("./static-data/trips.txt"))
-  .map(trip => {
-      const joinedCalendarDate = usefulCalenderDatesData.find(calendarDate =>
-       calendarDate.service_id === trip[1]);
-
-      const joinedRoute = usefulRoutesData.find(route =>
-       route.route_id === trip[0]);
-
-      if (joinedCalendarDate == null || joinedRoute == null) return null;
-
-      return{
-        route_id : joinedRoute.route_id,
-        service_id : joinedCalendarDate.service_id,
-        trip_id : trip[2],
-        route_long_name : joinedRoute.route_long_name,
-        head_sign : trip[3]
-      }
-  }).filter(trip => trip != null);
-  console.log(usefulTripsData);
-
-
-  // Join all data with stop_times data.
-
-  const minuteTime = HourTimeToMinutes("08:00");
-  const minTime = minuteTime - 10;
-  const maxTime = minuteTime + 10;
-
-  
-  const usefulStopTimesData = (await parseLocalCSVToJSON("./static-data/stop_times.txt"))
-  .map(stopTime => {
-    
-      const joinedTrip = usefulTripsData.find(trip => trip.trip_id === stopTime[0]);
-      if(joinedTrip == null) return null;
-
-      const joinedStop = usefulStopsData.find(stop => stop.stop_id === stopTime[3]);
-      if (joinedStop == null) return null;
-
-      return{
-        route_id : joinedTrip.route_id,
-        service_id : joinedTrip.service_id,
-        trip_id : joinedTrip.trip_id,
-        route_long_name : joinedTrip.route_long_name,
-        stop_id : joinedStop.stop_id,
-        arrival_time : stopTime[1],
-        head_sign : joinedTrip.head_sign
-      }
-  }).filter(stopTime => {
-    if(stopTime == null) return false;
-    const minuteArrivalTime = HourTimeToMinutes(stopTime.arrival_time);
-    console.log(minuteArrivalTime, " ", maxTime, " ", minTime);
-    return( minuteArrivalTime >= minTime && minuteArrivalTime <= maxTime );
-  });
-
-  console.log(usefulStopTimesData);
-}
-*/
