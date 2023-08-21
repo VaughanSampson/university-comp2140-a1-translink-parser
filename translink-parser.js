@@ -77,10 +77,9 @@ async function getStopTimesFromStopIDs(stopIDList){
  * Gets and joins stop time data for UQ Lakes station.
  * @returns Object with accumulated stop time results.
  */
-
 async function loadUQStopsData(){
 
-  // Get stopIDs from stop.txt.
+  // Get all UQLakes station stopIDs from stop.txt.
   const stopIDs = (await parseLocalCSVToJSON("./static-data/stops.txt"))
   .filter(item => item[9] == "place_uqlksa")
   .map(item => item[0]);
@@ -150,7 +149,7 @@ function filterDataByTime(data, timeString, timeLength){
 function filterDataByShortRouteName(data, shortRouteName){
   if(shortRouteName == "Show All Routes")
     return data;
-
+  
   return data.filter(data => data.route_short_name == shortRouteName);
 }
 
@@ -252,7 +251,7 @@ async function joinLiveTripsToData(data){
 
   return data.map(item => {
     
-    const joinedLiveTrip = liveTripsData["entity"].find(item2 => {return item2.tripUpdate.trip.tripId === item.trip_id;});
+    const joinedLiveTrip = liveTripsData["entity"].find(item2 => item2.tripUpdate.trip.tripId === item.trip_id);
     return{
       ...item,
       "arrival" : joinedLiveTrip
@@ -271,14 +270,10 @@ async function joinLivePositionToData(data){
   const livePositionsData = await getCachableData("http://127.0.0.1:5343/gtfs/seq/vehicle_positions.json");
 
   return data.map(item => {
-
-    console.log(item.trip_id);
     
-    const joinedLivePosition = livePositionsData["entity"].find(item2 => {
-      console.log("match on: '" + item2.vehicle.trip.tripId + "' " + (item2.vehicle.trip.tripId === item.trip_id));
-      return (item2.vehicle.trip.tripId === item.trip_id);
-    });
+    const joinedLivePosition = livePositionsData["entity"].find(item2 => item2.vehicle.trip.tripId === item.trip_id);
 
+    // Currently all positions are coming up as undefined, because there is no overlap trip ID.
     console.log(joinedLivePosition);
 
     return{
