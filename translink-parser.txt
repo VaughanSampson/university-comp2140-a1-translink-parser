@@ -252,28 +252,10 @@ async function joinLiveTripsToData(data){
   return data.map(item => {
     
     const joinedLiveTrip = liveTripsData["entity"].find(item2 => item2.tripUpdate.trip.tripId === item.trip_id);
-    if(!joinedLiveTrip) console.log("No live");
-
-    const joinedStopUpdate = joinedLiveTrip? joinedLiveTrip.tripUpdate.stopTimeUpdate.find(item3 => item3.stopId === item.stop_id) : null;
-    
-    const unixTime = joinedStopUpdate? (joinedStopUpdate.arrival ? joinedStopUpdate.arrival.time : joinedStopUpdate.departure.time) : null;
-    const time = (unixTime? unixTimeToHHmm(unixTime) : "No Live Data");
-
     return{
       ...item,
-      "live_arrival_time" : time
+      "arrival" : joinedLiveTrip
     }
-
-    /**
-     * Converts a unix time stamp to an HH:mm string.
-     * @param {*} time Unix time stamp.
-     * @returns HHmm string refering to time of day.
-     */
-    function unixTimeToHHmm(time){
-      const dateConverstion = new Date(time * 1000);
-      return dateConverstion.toLocaleTimeString("default");
-    }
-    
    });
 }
 
@@ -291,9 +273,12 @@ async function joinLivePositionToData(data){
     
     const joinedLivePosition = livePositionsData["entity"].find(item2 => item2.vehicle.trip.tripId === item.trip_id);
 
+    // Currently most positions are coming up as undefined, because no match was found to do a join.
+    console.log(joinedLivePosition);
+
     return{
       ...item,
-      "position" : joinedLivePosition? joinedLivePosition.vehicle.position : "No Live Data"
+      "position" : joinedLivePosition
     }
 
   });
@@ -313,35 +298,31 @@ async function mainLoop(){
   // Get valid user input to filter results.
   const inputDate = getValidatedDateInput(prompt);
   const inputTime = getValidatedTimeInput(prompt);
-  const inputRoute = getValidatedRouteInput(prompt, uqStopsData);
+  const inputRoute = getValidatedBusRouteInput(prompt);
 
   // Get active services which run on inputted date.
   const activeServices = await getActiveServicesOnDate(inputDate);
 
   // Filter static data on active services.
   let filteredData = await filterDataByActiveServices(uqStopsData, activeServices);
-  // Filter joined data on time.
-  filteredData = await filterDataByTime(filteredData, inputTime, 10);
-  // Filter joined data on route.
-  filteredData = await filterDataByShortRouteName(filteredData, inputRoute);
 
   // Join static data with live data.
   filteredData = await joinLivePositionToData(filteredData);
   filteredData = await joinLiveTripsToData(filteredData);
 
-  // Order final data for table.
+  // Filter joined data on time and route name.
+  filteredData = await filterDataByTime(filteredData, inputTime, 10);
+  filteredData = await filterDataByShortRouteName(filteredData, inputRoute);
+
+  // Order final data for table
   const displayData = filteredData.map( data => {
-
-    //console.log(JSON.stringify(data));
-
     return{
       "Route Short Name": data.route_short_name,
       "Route Long Name" : data.route_long_name,
       "Service ID" : data.service_id,
       "Heading Sign" : data.trip_headsign,
       "Scheduled Arrival Time" : data.arrival_time,
-      "Live Arrival Time" : data.live_arrival_time,
-      "Live Position" : data.position
+      "live_position_data_found" : (data.joinedLivePosition != null) // Just for debugging purposes
     }
   });
 
@@ -401,28 +382,12 @@ function getValidatedTimeInput(prompt, promptText = "What time will you depart U
  * @param {*} promptText text to display in console.
  * @returns inputted string.
  */
-function getValidatedRouteInput(prompt, data, promptText = "What Bus Route would you like to take?"){
-  // Gets routes available
-  const routesAvailable = data.map(d =>  d.route_short_name)
-  .filter((value, index, array) => array.indexOf(value) === index);
-
+function getValidatedBusRouteInput(prompt, promptText = "What Bus Route would you like to take?"){
   const routeText = prompt(promptText);
-  if(!isNaN(routeText))
-  {
-    const routeNum = parseInt(routeText);
-    if(routeNum === 1)
-      return "Show All Routes";
-    else{
-      return routesAvailable[routeNum-2];
-    }
-  }
-
-  //Alternate code to instead take route_short_name as input.
-  /*
   if(routeText === "Show All Routes" || !isNaN(routeText))
     return routeText;
+
   return getValidatedBusRouteInput(prompt, "Please enter a valid option for a bus route.");
-  */
 }
 
 /**
