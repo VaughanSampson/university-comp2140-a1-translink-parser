@@ -247,16 +247,19 @@ async function getActiveServicesOnDate(dateString){
  */
 async function joinLiveTripsToData(data){
 
-  const liveTripsData = await getCachableData("http://127.0.0.1:5343/gtfs/seq/trip_updates.json");
+  const liveTripsData = await getOnlineCachableData(
+    "http://127.0.0.1:5343/gtfs/seq/trip_updates.json", "live_trips");
 
   return data.map(item => {
     
     const joinedLiveTrip = liveTripsData["entity"].find(item2 => item2.tripUpdate.trip.tripId === item.trip_id);
-    if(!joinedLiveTrip) console.log("No live");
 
-    const joinedStopUpdate = joinedLiveTrip? joinedLiveTrip.tripUpdate.stopTimeUpdate.find(item3 => item3.stopId === item.stop_id) : null;
+    const joinedStopUpdate = (joinedLiveTrip? 
+      joinedLiveTrip.tripUpdate.stopTimeUpdate.find(item3 => item3.stopId === item.stop_id) : null);
     
-    const unixTime = joinedStopUpdate? (joinedStopUpdate.arrival ? joinedStopUpdate.arrival.time : joinedStopUpdate.departure.time) : null;
+    const unixTime = (joinedStopUpdate? (joinedStopUpdate.arrival ? 
+      joinedStopUpdate.arrival.time : joinedStopUpdate.departure.time) : null);
+
     const time = (unixTime? unixTimeToHHmm(unixTime) : "No Live Data");
 
     return{
@@ -271,7 +274,7 @@ async function joinLiveTripsToData(data){
      */
     function unixTimeToHHmm(time){
       const dateConverstion = new Date(time * 1000);
-      return dateConverstion.toLocaleTimeString("default");
+      return dateConverstion.toLocaleTimeString("default",{ hour12: false });
     }
     
    });
@@ -285,11 +288,12 @@ async function joinLiveTripsToData(data){
  */
 async function joinLivePositionToData(data){
 
-  const livePositionsData = await getCachableData("http://127.0.0.1:5343/gtfs/seq/vehicle_positions.json");
+  const livePositionsData = await getOnlineCachableData(
+    "http://127.0.0.1:5343/gtfs/seq/vehicle_positions.json", "live_positions");
 
   return data.map(item => {
     
-    const joinedLivePosition = livePositionsData["entity"].find(item2 => item2.vehicle.trip.tripId === item.trip_id);
+    const joinedLivePosition = (livePositionsData["entity"].find(item2 => item2.vehicle.trip.tripId === item.trip_id));
 
     return{
       ...item,
@@ -301,11 +305,12 @@ async function joinLivePositionToData(data){
 
 /**
  * Recursive loop which is called to start and run the program.
+ * @param {*} preLoadedUqStopsData Data which has already been loaded in.
  */
-async function mainLoop(){
+async function mainLoop(preLoadedUqStopsData = null){
 
   // Get static stops data.
-  const uqStopsData = await loadUQStopsData();  
+  const uqStopsData = preLoadedUqStopsData ?? await loadUQStopsData();  
 
   console.log("Welcome to the UQ Lakes station bus tracker!");
   const prompt = promptSync();
@@ -326,14 +331,11 @@ async function mainLoop(){
   filteredData = await filterDataByShortRouteName(filteredData, inputRoute);
 
   // Join static data with live data.
-  filteredData = await joinLivePositionToData(filteredData);
   filteredData = await joinLiveTripsToData(filteredData);
+  filteredData = await joinLivePositionToData(filteredData);
 
   // Order final data for table.
   const displayData = filteredData.map( data => {
-
-    //console.log(JSON.stringify(data));
-
     return{
       "Route Short Name": data.route_short_name,
       "Route Long Name" : data.route_long_name,
@@ -352,11 +354,12 @@ async function mainLoop(){
 
   if(["y","yes"].includes(endStatus)) 
   {
-    mainLoop();
+    mainLoop(uqStopsData);
   }
   else
   if(["n","no"].includes(endStatus))
   {
+    // 'nn' input passed which needs fixing.
     console.log("Thanks for using the UQ Lakes station bus tracker");
     process.exit();
   } 
@@ -412,9 +415,12 @@ function getValidatedRouteInput(prompt, data, promptText = "What Bus Route would
     const routeNum = parseInt(routeText);
     if(routeNum === 1)
       return "Show All Routes";
-    else{
+    else
+    if(routeNum >= 2 && routeNum - 2 < routesAvailable.length)
       return routesAvailable[routeNum-2];
-    }
+    else
+      return getValidatedRouteInput(prompt, data, "Please enter a valid option for a bus route.");
+    
   }
 
   //Alternate code to instead take route_short_name as input.
@@ -440,12 +446,59 @@ async function parseLocalCSVToJSON(path){
 };
 
 /**
- * If data is cached, reads the data, otherwise gets data from url and caches it.
+ * If data is validly cached, reads the data, otherwise gets data from url and caches it.
  * @param {*} url Link to onine data.
  * @param {*} fileName Name of cached file.
  */
-async function getCachableData(url, fileName){
-  return await parseOnlineDataToJSON(url);
+async function getOnlineCachableData(url, fileName){
+  const filePath = "cached-data/translink-parser_" + fileName + ".json";
+  if(fs.existsSync(filePath))
+  {
+    const data = await readJSONCache(filePath);
+
+    // Only accept cached data if it was made in the last 5 minutes.
+    const nowTime = Date.now();
+    const cachedDate = new Date(+data["cached_time"]);
+    if(nowTime - cachedDate < 300000)
+      return data;
+  }
+
+  // If there was no appropriate cache file, fetch data and cache it.
+  const data = await parseOnlineDataToJSON(url);
+  await cacheJSONData(data, filePath);
+  return data;
+}
+
+/**
+ * Saves the given JSON data to the given file path.
+ * @param {*} data JSON data.
+ * @param {*} filePath Path to save to.
+ */
+async function cacheJSONData(data, filePath){
+  try {
+    // Adds date of cache creation to object for caching.
+    data["cached_time"] = Date.now();
+    await fs.writeFileSync(filePath, JSON.stringify(data));
+  }
+  catch(e){
+    console.log(e);
+  }
+}
+
+/**
+ * Gets JSON data from the given file path.
+ * @param {*} filePath Path to json file.
+ * @returns Parsed JSON data read from the given file path.
+ */
+async function readJSONCache(filePath) {
+  try {
+      const data = await fs.readFileSync(filePath);
+      const dataJSON = await JSON.parse(data);
+      return dataJSON;
+  }
+  catch(e){
+      console.log(e);
+  }
 }
 
 /**
