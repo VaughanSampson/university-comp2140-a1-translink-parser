@@ -349,21 +349,33 @@ async function mainLoop(preLoadedUqStopsData = null){
 
   console.table(displayData);
   
-  // Get valid user input to end or loop the program.
-  const endStatus = prompt("Would you like to search again?").toLowerCase();
-
-  if(["y","yes"].includes(endStatus)) 
+  // Checks if the user wants to search again, otherwise ends program.
+  if(getSearchAgainInput(prompt))
   {
     mainLoop(uqStopsData);
   }
   else
-  if(["n","no"].includes(endStatus))
   {
-    // 'nn' input passed which needs fixing.
-    console.log("Thanks for using the UQ Lakes station bus tracker");
+    console.log("Thanks for using the UQ Lakes station bus tracker.");
     process.exit();
-  } 
+  }
+}
 
+/**
+ * Asks user if they would like to search again. Returns true or false depending in the user's input.
+ * @param {*} prompt instance of prompt-sync() to get user input from console.
+ * @param {*} promptText text to display in console.
+ * @returns True if the user wants to search again, otherwise false.
+ */
+function getSearchAgainInput(prompt, promptText = "Would you like to search again? "){
+  const endStatus = prompt(promptText).toLowerCase();
+  if(["y","yes"].includes(endStatus))
+    return true;
+  else
+  if(["n","no"].includes(endStatus))
+    return false;
+  
+  return getSearchAgainInput(prompt, "Please enter a valid option. ");
 }
 
 /**
@@ -372,14 +384,14 @@ async function mainLoop(preLoadedUqStopsData = null){
  * @param {*} promptText text to display in console.
  * @returns validated input string with hyphens excluded.
  */
-function getValidatedDateInput(prompt, promptText = "What date will you depart UQ Lakes station by bus?"){
+function getValidatedDateInput(prompt, promptText = "What date will you depart UQ Lakes station by bus? "){
   const dateRegExp = new RegExp("[0-9]{4}\-[0-9]{2}\-[0-9]{2}");
   const dateText = prompt(promptText);
 
   if(dateRegExp.test(dateText)) 
     return dateText; 
   
-  return getValidatedDateInput(prompt, "Incorrect date format. Please use YYYY-MM-DD");
+  return getValidatedDateInput(prompt, "Incorrect date format. Please use YYYY-MM-DD. ");
 }
 
 /**
@@ -388,14 +400,14 @@ function getValidatedDateInput(prompt, promptText = "What date will you depart U
  * @param {*} promptText text to display in console.
  * @returns array of strings, including hour and then minutes.
  */
-function getValidatedTimeInput(prompt, promptText = "What time will you depart UQ Lakes station by bus?"){
+function getValidatedTimeInput(prompt, promptText = "What time will you depart UQ Lakes station by bus? "){
   const timeRegExp = new RegExp("[0-9]{2}\:[0-9]{2}");
   const timeText = prompt(promptText);
 
   if(timeRegExp.test(timeText)) 
     return timeText; 
   
-  return getValidatedTimeInput(prompt, "Incorrect time format. Please use HH:mm");
+  return getValidatedTimeInput(prompt, "Incorrect time format. Please use HH:mm. ");
 }
 
 /**
@@ -404,7 +416,7 @@ function getValidatedTimeInput(prompt, promptText = "What time will you depart U
  * @param {*} promptText text to display in console.
  * @returns inputted string.
  */
-function getValidatedRouteInput(prompt, data, promptText = "What Bus Route would you like to take?"){
+function getValidatedRouteInput(prompt, data, promptText = "What Bus Route would you like to take? "){
   // Gets routes available
   const routesAvailable = data.map(d =>  d.route_short_name)
   .filter((value, index, array) => array.indexOf(value) === index);
@@ -423,7 +435,7 @@ function getValidatedRouteInput(prompt, data, promptText = "What Bus Route would
     if(routeNum >= 2 && routeNum - 2 < routesAvailable.length)
       return routesAvailable[routeNum-2];
   }
-  return getValidatedRouteInput(prompt, data, "Please enter a valid option for a bus route.");
+  return getValidatedRouteInput(prompt, data, "Please enter a valid option for a bus route. ");
 }
 
 /**
