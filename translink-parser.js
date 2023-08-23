@@ -3,79 +3,56 @@ import fs from "fs";
 import {parse} from "csv-parse";
 
 /**
- * Joins given left and right objects where the given field is equal for each.
- * @param {*} joinType Type of join ("left", "right", or "inner").
- * @param {*} onField Field of both objects to test for a match.
- * @param {*} left Left object.
- * @param {*} right Right object.
- * @param {*} addFieldsFromJoin Fields to be taken from the secondary joined object.
- * @returns Joined objects.
+ * Joins given left and right objects on the given field.
+ * @param {string} joinType - Type of join ("left", "right", or "inner").
+ * @param {string} onField - Field of both objects to test for a match.
+ * @param {object} left - Left object of join.
+ * @param {object} right - Right object of join.
+ * @param {string[]} addFieldsFromJoin - Fields to be taken from the secondary joined object.
+ * @returns {object} Object resulting from join.
  */
-async function joinOnField(joinType = "inner", onField, left, right, addFieldsFromJoin)
+async function joinObjectsOnField(joinType, onField, left, right, addFieldsFromJoin)
 {
   // If join is "right", then simply flip left and right fields with recursion.
   if (joinType === "right")
-    return joinOnField("left", onField, right, left, addFieldsFromJoin);
+    return joinObjectsOnField("left", onField, right, left, addFieldsFromJoin);
   
-  // Join with array.map and array.find.
+  // Map left object to a joined object.
   const joined = left.map(leftItem => {
+  
+    // Find a matching right object.
+    const rightItem = right.find(rightItem => rightItem[onField] === leftItem[onField]);
 
-      const rightItem = right.find(rightItem => rightItem[onField] === leftItem[onField]);
-      /*
-      if(onField === "trip_id")
-      {
-        console.log(rightItem[onField]);
-        console.log(leftItem[onField]+ "\n");
-      }
-      */
-
-      // Handle join if there is no matching rightItem.
-      if(!rightItem)
-      {
-        if (joinType === "inner") 
-          return null;
-        
-        if(joinType === "left")
-          return leftItem;
-      }
-
-      // Merge matching fields found
-      const mergedRight = {};
-      for (const field of addFieldsFromJoin)
-        if (rightItem.hasOwnProperty(field))
-          mergedRight[field] = rightItem[field];
+    // Handle join if there is no matching rightItem.
+    if(!rightItem)
+    {
+      if (joinType === "inner") 
+        return null;
       
-        return{
-          ...leftItem,
-          ...mergedRight
-        };
+      if(joinType === "left")
+        return leftItem;
+    }
+
+    // Merge matching fields found.
+    const mergedRight = {};
+    for (const field of addFieldsFromJoin)
+      if (rightItem.hasOwnProperty(field))
+        mergedRight[field] = rightItem[field];
+    
+    return{
+      ...leftItem,
+      ...mergedRight
+    };
     
   }).filter(joined => joined != null); // Remove null returns.
 
   return joined;
 }
 
-/**
- * Get stop times which have a stopID which is included in the given array.
- * @param {*} stopIDList Array of stop IDs.
- * @returns JSON array of stop times which have a stopID included in the given array
- */
-async function getStopTimesFromStopIDs(stopIDList){
-  const stopTimes = (await parseLocalCSVToJSON("./static-data/stop_times.txt"))
-  .filter(item => stopIDList.includes(item[3]))
-  .map(item => { return {
-    trip_id : item[0],
-    arrival_time : item[1],
-    stop_id : item[3],
-    stop_sequence : item[4]
-  }});
-  return stopTimes;
-}
-
 
 /**
- * Gets and joins stop time data for UQ Lakes station.
- * @returns Object with accumulated stop time results.
+ * Gets and then joins stop time data for UQ Lakes station.
+ * @returns {object} Object with accumulated stop time results.
  */
 async function loadUQStopsData(){
 
@@ -96,7 +73,7 @@ async function loadUQStopsData(){
     trip_headsign : item[3]
   }});
 
-  let joinedData = await joinOnField("inner", "trip_id", stopTimes, trips, ['route_id','service_id','trip_headsign']); 
+  let joinedData = await joinObjectsOnField("inner", "trip_id", stopTimes, trips, ['route_id','service_id','trip_headsign']); 
   
   // Get routes data from routes.txt.
   const routes = (await parseLocalCSVToJSON("./static-data/routes.txt"))
@@ -106,17 +83,35 @@ async function loadUQStopsData(){
       route_long_name : item[2],
   }});
 
-  joinedData = await joinOnField("inner", "route_id", joinedData, routes, ['route_short_name','route_long_name']);
+  joinedData = await joinObjectsOnField("inner", "route_id", joinedData, routes, ['route_short_name','route_long_name']);
 
   return joinedData;
+
+  /**
+   * Get all stop times which have a stopID included in the given array.
+   * @param {string[]} stopIDList - Array of string stop IDs.
+   * @returns {object} Object with array of stop times.
+   */
+  async function getStopTimesFromStopIDs(stopIDList){
+    const stopTimes = (await parseLocalCSVToJSON("./static-data/stop_times.txt"))
+    .filter(item => stopIDList.includes(item[3]))
+    .map(item => { return {
+      trip_id : item[0],
+      arrival_time : item[1],
+      stop_id : item[3],
+      stop_sequence : item[4]
+    }});
+    return stopTimes;
+  }
 } 
 
 /**
- * Filters stop time data to select stop times which fit in time interval.
- * @param {*} data Stop time data.
- * @param {*} timeString Start of time interval.
- * @param {*} minuteDifference Length of time interval.
- * @returns Data filtered over time interval.
+ * Filters stop time data to select stop times which 
+ * fit in the given time interval.
+ * @param {object} data - Stop time data.
+ * @param {string} timeString - Start of time interval as string.
+ * @param {int} minuteDifference - Minute length of time interval.
+ * @returns {objec} Data filtered over the given time interval.
  */
 function filterDataByTime(data, timeString, timeLength){
   const minTime = HHmmToMinuteCount(timeString);
@@ -128,9 +123,10 @@ function filterDataByTime(data, timeString, timeLength){
   });
 
   /**
-   * Convect HH:mm time to number of minutes.
-   * @param {*} timeString HH:mm formatted string.
-   * @returns number of minutes.
+   * Convect HH:mm time to number of minutes 
+   * since the start of the day.
+   * @param {string} timeString - HH:mm formatted string.
+   * @returns {int} Number of minutes.
    */
   function HHmmToMinuteCount(timeString){
     return (+timeString[0]) * 600 
@@ -142,9 +138,9 @@ function filterDataByTime(data, timeString, timeLength){
 
 /**
  * Filters stop time data by its short route name.
- * @param {*} data stop time data.
- * @param {*} shortRouteName short route name.
- * @returns Filtered stop time data.
+ * @param {object} data - Stop time data.
+ * @param {string} shortRouteName - Short route name.
+ * @returns {object} Filtered stop time data.
  */
 function filterDataByShortRouteName(data, shortRouteName){
   if(shortRouteName == "Show All Routes")
@@ -155,9 +151,9 @@ function filterDataByShortRouteName(data, shortRouteName){
 
 /**
  * Filters stop time data by its inclusion in a given list of active services.
- * @param {*} data stop time data.
- * @param {*} activeServices active services.
- * @returns Filtered stop time data.
+ * @param {object} data - Stop time data.
+ * @param {string[]} activeServices - Array of service ids covering all active services.
+ * @returns {object} Filtered stop time data.
  */
 function filterDataByActiveServices(data, activeServices){
   return data.filter(d => activeServices.includes(d.service_id));
@@ -165,18 +161,19 @@ function filterDataByActiveServices(data, activeServices){
 
 /**
  * Get all the services that are active on the given date.
- * @param {*} dateString 
- * @returns 
+ * @param {string} dateString - Date in string format YYYY-MM-DD.
+ * @returns {string[]} Array of service ids which cover all active services.
  */
 async function getActiveServicesOnDate(dateString){
 
-  // Get date and day of wee from string.
+  // Get the date and day of the week from string.
   const date = new Date(dateString);
   let day = date.getDay();
   if(day === 0) day = 7;
 
   // Get calendar dates from calender.txt.
-  const calendarBaseServices = (await parseLocalCSVToJSON("./static-data/calendar.txt"))
+  const calendarBaseServices = (await 
+    parseLocalCSVToJSON("./static-data/calendar.txt"))
   .map(data => {
     // Check day of week.
     if(data[day] === 0) 
@@ -192,7 +189,7 @@ async function getActiveServicesOnDate(dateString){
     if(data === null) 
       return false;
 
-    // Check that date given sits in calendar date interval.
+    // Check that date given sits in the calendar date interval.
     const parsedStartDate = Date.parse(data.start_date.slice(0, 4) 
     + "-" + data.start_date.slice(4,6) + '-' + data.start_date.slice(6));
     const parsedEndDate = Date.parse(data.end_date.slice(0, 4) 
@@ -220,7 +217,7 @@ async function getActiveServicesOnDate(dateString){
   .filter(data => data.date === dateString.replaceAll("-", ""));
 
   // Apply calendar date exceptions to array of services.
-  for(calendarDateException in calendarDateExceptions)
+  for (calendarDateException in calendarDateExceptions)
   {
     if(calendarDateException.exception === 2)
     {
@@ -251,33 +248,38 @@ async function joinLiveTripsToData(data){
     "http://127.0.0.1:5343/gtfs/seq/trip_updates.json", "live_trips");
 
   return data.map(item => {
-    
+
+    // Find a live trip with a matching trip_id.
     const joinedLiveTrip = liveTripsData["entity"].find(item2 => item2.tripUpdate.trip.tripId === item.trip_id);
 
+    // Check if a joinedLiveTrip was found. If so, set joinedStopUpdate to a match on stop_id.
+    // If no joinedLiveTrip was found, set joinedStopUpdate to null.
     const joinedStopUpdate = (joinedLiveTrip? 
       joinedLiveTrip.tripUpdate.stopTimeUpdate.find(item3 => item3.stopId === item.stop_id) : null);
     
+    // If a joinedStopUpdate was found, get its arrival time. In the case that there
+    // is no arrival time, user departure time.
     const unixTime = (joinedStopUpdate? (joinedStopUpdate.arrival ? 
       joinedStopUpdate.arrival.time : joinedStopUpdate.departure.time) : null);
 
+    // Convert found time to HHmm.
     const time = (unixTime? unixTimeToHHmm(unixTime) : "No Live Data");
 
     return{
       ...item,
       "live_arrival_time" : time
     }
-
-    /**
-     * Converts a unix time stamp to an HH:mm string.
-     * @param {*} time Unix time stamp.
-     * @returns HHmm string refering to time of day.
-     */
-    function unixTimeToHHmm(time){
-      const dateConverstion = new Date(time * 1000);
-      return dateConverstion.toLocaleTimeString("default",{ hour12: false });
-    }
-    
    });
+
+  /**
+   * Converts a unix time stamp to an HH:mm string.
+   * @param {*} time Unix time stamp.
+   * @returns HHmm string refering to time of day.
+   */
+  function unixTimeToHHmm(time){
+    const dateConverstion = new Date(time * 1000);
+    return dateConverstion.toLocaleTimeString("default",{ hour12: false });
+  }
 }
 
 /**
@@ -293,6 +295,7 @@ async function joinLivePositionToData(data){
 
   return data.map(item => {
     
+    // Find live position with matching trip id.
     const joinedLivePosition = (livePositionsData["entity"].find(item2 => item2.vehicle.trip.tripId === item.trip_id));
 
     return{
@@ -461,50 +464,57 @@ async function getOnlineCachableData(url, fileName){
   const filePath = "cached-data/translink-parser_" + fileName + ".json";
   if(fs.existsSync(filePath))
   {
+    //Get the cache at the given path.
     const data = await readJSONCache(filePath);
-
-    // Only accept cached data if it was made in the last 5 minutes.
-    const nowTime = Date.now();
-    const cachedDate = new Date(+data["cached_time"]);
-    if(nowTime - cachedDate < 300000)
-      return data;
+    
+    // Make sure the cached data was retrieved without errors.
+    if(data != null){
+      // Only accept cached data if it was made in the last 5 minutes.
+      // Otherwise it will be flushed and overwritten.
+      const nowTime = Date.now();
+      const cachedDate = new Date(+data["cached_time"]);
+      if(nowTime - cachedDate < 300000)
+        return data;
+    }
   }
 
-  // If there was no appropriate cache file, fetch data and cache it.
+  // If there was no appropriate cache file, fetch data,
+  // cache that data for later calls and return it.
   const data = await parseOnlineDataToJSON(url);
   await cacheJSONData(data, filePath);
   return data;
-}
 
-/**
- * Saves the given JSON data to the given file path.
- * @param {*} data JSON data.
- * @param {*} filePath Path to save to.
- */
-async function cacheJSONData(data, filePath){
-  try {
-    // Adds date of cache creation to object for caching.
-    data["cached_time"] = Date.now();
-    await fs.writeFileSync(filePath, JSON.stringify(data));
+  /**
+   * Saves the given JSON data to the given file path.
+   * @param {*} data JSON data.
+   * @param {*} filePath Path to save to.
+   */
+  async function cacheJSONData(data, filePath){
+    try {
+      // Adds date of cache creation to object for caching.
+      data["cached_time"] = Date.now();
+      await fs.writeFileSync(filePath, JSON.stringify(data));
+    }
+    catch(e){
+      console.log(e);
+    }
   }
-  catch(e){
-    console.log(e);
-  }
-}
 
-/**
- * Gets JSON data from the given file path.
- * @param {*} filePath Path to json file.
- * @returns Parsed JSON data read from the given file path.
- */
-async function readJSONCache(filePath) {
-  try {
+  /**
+   * Gets JSON data from the given file path.
+   * @param {*} filePath Path to json file.
+   * @returns Parsed JSON data read from the given file path.
+   */
+  async function readJSONCache(filePath) {
+    try {
       const data = await fs.readFileSync(filePath);
       const dataJSON = await JSON.parse(data);
       return dataJSON;
-  }
-  catch(e){
+    }
+    catch(e){
       console.log(e);
+      return null;
+    }
   }
 }
 
@@ -523,4 +533,5 @@ async function parseOnlineDataToJSON(url){
   return returnJSON;
 }
 
+// Begins the program.
 mainLoop();
