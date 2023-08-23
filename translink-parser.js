@@ -409,7 +409,11 @@ function getValidatedRouteInput(prompt, data, promptText = "What Bus Route would
   const routesAvailable = data.map(d =>  d.route_short_name)
   .filter((value, index, array) => array.indexOf(value) === index);
 
-  const routeText = prompt(promptText);
+  const routesDisplay = routesAvailable.map((value, index) =>{
+    return ` ${index + 2}: ${value}`;
+  });
+
+  const routeText = prompt(promptText + " (1: Show All Routes," + routesDisplay+ "): ");
   if(!isNaN(routeText))
   {
     const routeNum = parseInt(routeText);
@@ -418,17 +422,8 @@ function getValidatedRouteInput(prompt, data, promptText = "What Bus Route would
     else
     if(routeNum >= 2 && routeNum - 2 < routesAvailable.length)
       return routesAvailable[routeNum-2];
-    else
-      return getValidatedRouteInput(prompt, data, "Please enter a valid option for a bus route.");
-    
   }
-
-  //Alternate code to instead take route_short_name as input.
-  /*
-  if(routeText === "Show All Routes" || !isNaN(routeText))
-    return routeText;
-  return getValidatedBusRouteInput(prompt, "Please enter a valid option for a bus route.");
-  */
+  return getValidatedRouteInput(prompt, data, "Please enter a valid option for a bus route.");
 }
 
 /**
