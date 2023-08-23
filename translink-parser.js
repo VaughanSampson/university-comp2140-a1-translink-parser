@@ -57,8 +57,7 @@ async function mainLoop(preLoadedUqStopsData = null) {
     mainLoop(uqStopsData);
   }
   else {
-    console.log("Thanks for using the UQ Lakes station bus tracker.");
-    process.exit();
+    console.log("Thanks for using the UQ Lakes station bus tracker!");
   }
 }
 
@@ -222,7 +221,7 @@ async function getActiveServicesOnDate(dateString) {
   .filter(data => data.date === dateString.replaceAll("-", ""));
 
   // Apply calendar date exceptions to array of services.
-  for (calendarDateException in calendarDateExceptions)
+  for (const calendarDateException in calendarDateExceptions)
   {
     if(calendarDateException.exception === 2) {
       // Remove service of the given exception.
@@ -407,7 +406,7 @@ function getValidatedTimeInput(
   prompt, 
   promptText = "What time will you depart UQ Lakes station by bus? "
   ) {
-  const timeRegExp = new RegExp("[0-9]{2}\:[0-9]{2}");
+  const timeRegExp = new RegExp("^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$");
   const timeText = prompt(promptText);
 
   if(timeRegExp.test(timeText)) 
