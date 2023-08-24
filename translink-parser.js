@@ -254,7 +254,7 @@ function filterDataByTime(data, timeString, timeLength) {
 
   return data.filter(data => {
     const minuteArrivalTime = HHmmToMinuteCount(data.arrival_time);
-    return (minuteArrivalTime >= minTime && minuteArrivalTime <= maxTime);
+    return (minuteArrivalTime >= minTime && minuteArrivalTime < maxTime);
   });
 
   /**
